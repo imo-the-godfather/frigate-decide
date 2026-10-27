@@ -1,0 +1,86 @@
+[
+ {
+  "id": "synthetic-000",
+  "camera": "synthetic",
+  "label": "person",
+  "score": 0.8,
+  "zones": []
+ },
+ {
+  "id": "synthetic-001",
+  "camera": "synthetic",
+  "label": "vehicle",
+  "score": 0.8,
+  "zones": []
+ },
+ {
+  "id": "synthetic-002",
+  "camera": "synthetic",
+  "label": "person",
+  "score": 0.8,
+  "zones": []
+ },
+ {
+  "id": "synthetic-003",
+  "camera": "synthetic",
+  "label": "nothing",
+  "score": 0.8,
+  "zones": []
+ },
+ {
+  "id": "synthetic-004",
+  "camera": "synthetic",
+  "label": "vehicle",
+  "score": 0.8,
+  "zones": []
+ },
+ {
+  "id": "synthetic-005",
+  "camera": "synthetic",
+  "label": "animal",
+  "score": 0.8,
+  "zones": []
+ },
+ {
+  "id": "synthetic-006",
+  "camera": "synthetic",
+  "label": "person",
+  "score": 0.8,
+  "zones": []
+ },
+ {
+  "id": "synthetic-007",
+  "camera": "synthetic",
+  "label": "person",
+  "score": 0.8,
+  "zones": []
+ },
+ {
+  "id": "synthetic-008",
+  "camera": "synthetic",
+  "label": "nothing",
+  "score": 0.8,
+  "zones": []
+ },
+ {
+  "id": "synthetic-009",
+  "camera": "synthetic",
+  "label": "vehicle",
+  "score": 0.8,
+  "zones": []
+ },
+ {
+  "id": "synthetic-010",
+  "camera": "synthetic",
+  "label": "person",
+  "score": 0.8,
+  "zones": []
+ },
+ {
+  "id": "synthetic-011",
+  "camera": "synthetic",
+  "label": "vehicle",
+  "score": 0.8,
+  "zones": []
+ }
+]

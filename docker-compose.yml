@@ -1,0 +1,18 @@
+# Runs next to Frigate on the same host: host networking reaches the broker
+# (localhost:1883) and the Frigate API (localhost:5000) with no published ports
+# of its own. Mount your config at /etc/frigate-decide/config.yaml.
+services:
+  frigate-decide:
+    build: .
+    image: frigate-decide:latest
+    container_name: frigate-decide
+    restart: unless-stopped
+    network_mode: host
+    mem_limit: 256m
+    volumes:
+      - ./config.yaml:/etc/frigate-decide/config.yaml:ro
+      - frigate-decide-state:/data
+    command: ["run", "--config", "/etc/frigate-decide/config.yaml"]
+
+volumes:
+  frigate-decide-state:

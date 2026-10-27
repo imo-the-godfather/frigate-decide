@@ -1,0 +1,21 @@
+# Home Assistant side: frigate-decide POSTs its decision record to this
+# webhook when the rules say notify (and shadow: false). Put your mobile
+# notify service where NOTIFY_SERVICE is marked.
+automation:
+  - alias: frigate-decide gated alert
+    id: frigate_decide_gated_alert
+    trigger:
+      - platform: webhook
+        webhook_id: frigate_decide
+        allowed_methods:
+          - POST
+        local_only: true
+    action:
+      - service: NOTIFY_SERVICE   # e.g. notify.mobile_app_s24_tailscale
+        data:
+          title: "{{ trigger.json.camera }}: {{ trigger.json.label }}"
+          message: >-
+            {{ trigger.json.answers.scene.choice }} ({{ trigger.json.answers.scene.probabilities[trigger.json.answers.scene.choice] | default('?') }}) - {{ trigger.json.reason }}
+          data:
+            tag: frigate-decide-{{ trigger.json.event_id }}
+    mode: queued

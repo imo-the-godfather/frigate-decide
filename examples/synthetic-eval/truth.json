@@ -1,0 +1,17 @@
+{
+ "scene": [
+  "person_property",
+  "vehicle_street",
+  "person_property",
+  "nothing",
+  "vehicle_street",
+  "animal",
+  "person_street",
+  "person_property",
+  "nothing",
+  "vehicle_driveway",
+  "person_property",
+  "vehicle_street"
+ ],
+ "notes": "SYNTHETIC smoke-test corpus - colours only, no real cameras."
+}

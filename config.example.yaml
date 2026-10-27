@@ -1,0 +1,43 @@
+# frigate-decide configuration. Copy to config.yaml and edit.
+# Everything here runs on the box next to Frigate; inference happens on the
+# Ollama endpoints you list (ordered - first one that answers wins).
+
+mqtt:
+  host: 127.0.0.1          # the broker Frigate publishes to
+  port: 1883
+  # username: frigate-decide
+  # password: secret
+
+frigate:
+  url: http://127.0.0.1:5000
+  topics: [frigate/events, frigate/reviews]
+
+decide:
+  endpoints:               # tried in order; fail-open if all fail
+    - http://gpu-box.lan:11434
+    - http://127.0.0.1:11434
+  model: d1                # any Ollama vision model that speaks /v1/systemone
+  timeout_s: 8             # GPU-sized timeout; raise for CPU-only
+  keep_alive: 5m           # short: unload promptly so the box keeps its RAM
+
+# The gate: notify iff this answer matches. `in` is a list or single value.
+rules:
+  notify_when:
+    question: scene
+    field: choice
+    in: [person_property]
+
+# Cheap drops before anything reaches the model (Frigate's own values).
+prefilter:
+  labels: []               # empty = all labels
+  min_score: 0.0
+  stationary_only: false
+  zones: []                # empty = all zones
+
+cooldown_s: 120            # one decision per camera per window
+queue_max: 8               # bounded queue, drop-oldest on burst
+
+shadow: true               # decide + publish only; flip to false when you
+                           # trust the gate and ha.webhook is set
+ha:
+  webhook: null            # e.g. http://127.0.0.1:8123/api/webhook/frigate_decide
