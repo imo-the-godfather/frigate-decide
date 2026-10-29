@@ -50,5 +50,12 @@ def main(argv=None) -> int:
         endpoints,
         timeout_s=args.timeout,
     )
-    Path("eval-results.json").write_text(json.dumps(summaries, indent=1))
+    out = Path("eval-results.json")
+    try:
+        out.write_text(json.dumps(summaries, indent=1))
+    except OSError:
+        import tempfile
+        out = Path(tempfile.gettempdir()) / "eval-results.json"
+        out.write_text(json.dumps(summaries, indent=1))
+        print(f"eval-results.json written to {out} (working directory not writable)")
     return 0

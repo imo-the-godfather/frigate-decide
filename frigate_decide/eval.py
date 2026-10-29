@@ -122,5 +122,3 @@ def run(folder: str, models: list[str], endpoints: list[str], questions=None,
                                    keep_alive, progress, ask_fn=ask))
     progress("\n" + render_table(summaries))
     return summaries
-    progress("\n" + render_table(summaries))
-    return summaries
