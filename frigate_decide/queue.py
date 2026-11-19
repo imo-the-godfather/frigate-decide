@@ -27,9 +27,10 @@ class Event:
 class Gatekeeper:
     """Accept/reject events, then hand them to a worker one at a time."""
 
-    def __init__(self, cfg: dict, process):
+    def __init__(self, cfg: dict, process, on_skip=None):
         self.cfg = cfg
         self.process = process  # callable(Event) -> None, runs in the worker thread
+        self.on_skip = on_skip  # callable(reason, Event) -> None, observability only
         self.queue: deque[Event] = deque(maxlen=int(cfg["queue_max"]))
         self._lock = threading.Lock()
         self._wake = threading.Event()
@@ -43,26 +44,34 @@ class Gatekeeper:
     def submit(self, event: Event) -> bool:
         if not self._passes_prefilter(event):
             self.dropped["prefilter"] += 1
+            self._skipped("prefilter", event)
             return False
         with self._lock:
             if event.event_id in self._seen_ids:
                 self.dropped["duplicate"] += 1
+                self._skipped("duplicate", event)
                 return False
             now = time.monotonic()
             last = self._last_seen.get(event.camera)
             if last is not None and now - last < float(self.cfg["cooldown_s"]):
                 self.dropped["cooldown"] += 1
+                self._skipped("cooldown", event)
                 return False
             self._last_seen[event.camera] = now
             self._seen_ids.add(event.event_id)
             if len(self._seen_ids) > 4096:
                 self._seen_ids.clear()
             if self.queue.maxlen == len(self.queue):
-                self.queue.popleft()  # drop-oldest
+                oldest = self.queue.popleft()  # drop-oldest
                 self.dropped["full"] += 1
+                self._skipped("full", oldest)
             self.queue.append(event)
         self._wake.set()
         return True
+
+    def _skipped(self, reason: str, event: Event) -> None:
+        if self.on_skip:
+            self.on_skip(reason, event)
 
     def _passes_prefilter(self, event: Event) -> bool:
         pf = self.cfg["prefilter"]

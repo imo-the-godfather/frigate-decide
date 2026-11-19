@@ -41,3 +41,8 @@ shadow: true               # decide + publish only; flip to false when you
                            # trust the gate and ha.webhook is set
 ha:
   webhook: null            # e.g. http://127.0.0.1:8123/api/webhook/frigate_decide
+
+# Running totals for `frigate-decide stats` (published / skipped / fail_open).
+# Every skip and fail-open decision also logs a structured SKIP / FAIL_OPEN
+# line. Set to null to disable; /data is the compose state volume.
+stats_path: /data/stats.json

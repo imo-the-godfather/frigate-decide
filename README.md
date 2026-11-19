@@ -98,6 +98,33 @@ ones:
 - `prefilter` - labels / min_score / zones / stationary_only, applied before
   the model sees anything.
 - `shadow` - decide + publish only, change nothing. **Start here.**
+- `stats_path` - where running totals are written (`/data/stats.json` in the
+  compose setup; `null` disables).
+
+## Observability
+
+A quiet log means a quiet day, never a dead subscription: every skip and every
+fail-open decision logs one structured line.
+
+```
+2026-11-19 05:21:00,123 frigate-decide INFO SKIP reason=cooldown camera=front_cam event=1793046391.796194-xbchwp zones=yard
+2026-11-19 05:21:00,456 frigate-decide WARNING FAIL_OPEN camera=front_cam event=1793046399.123-abc123 no model answered (attempts: http://127.0.0.1:11434: timeout) - event passes through and notifies per the fail-open rule
+```
+
+Skip reasons: `prefilter`, `duplicate`, `cooldown`, `full` (queue
+drop-oldest), `ended_event`, `no_camera`, `no_event_id`, `no_detection_id`,
+`no_snapshot`, `bad_payload`.
+
+Running totals (published / skipped / fail_open):
+
+```
+frigate-decide stats
+published: 12
+skipped:   47 (cooldown=31, ended_event=14, prefilter=2)
+fail_open: 1
+received:  60
+updated:   2026-11-19T05:21:00+00:00 (from /data/stats.json)
+```
 
 ## Design notes
 

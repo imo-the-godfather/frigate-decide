@@ -6,6 +6,8 @@ the alerts you already get. Flip `shadow: false` when you trust the gate.
 import json
 import logging
 import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
 
 from . import decide, ha, rules
 from .queue import Event, Gatekeeper
@@ -15,28 +17,48 @@ log = logging.getLogger("frigate-decide")
 DECISION_TOPIC = "frigate_decide/{camera}/decision"
 
 
-def event_from_payload(payload: dict) -> Event | None:
-    """Accept frigate/events ({before, after}) and frigate/reviews payloads."""
+def _fmt_zones(zones) -> str:
+    return ",".join(str(z) for z in (zones or [])) or "-"
+
+
+def parse_event(payload: dict) -> tuple[Event | None, str, dict]:
+    """Parse a payload into (event, skip_reason, context).
+
+    event is None when the payload must be skipped; reason is then a stable
+    token for the SKIP log line and the stats totals (bad_payload, ended_event,
+    no_camera, no_detection_id, no_event_id), and context carries whatever
+    camera/event_id/zones could be recovered for that line. Observability only:
+    the accept/skip decision itself is unchanged.
+    """
     if not isinstance(payload, dict):
-        return None
+        return None, "bad_payload", {}
     data = payload.get("after") or payload.get("before") or payload
     if not isinstance(data, dict):
-        return None
+        return None, "bad_payload", {}
+    ctx = {
+        "camera": data.get("camera"),
+        "event_id": data.get("id"),
+        "zones": data.get("current_zones"),
+    }
     if data.get("end_time"):
-        return None  # ended events carry no snapshot worth deciding on
-    camera = data.get("camera")
-    if not camera:
-        return None
+        return None, "ended_event", ctx  # ended events carry no snapshot worth deciding on
+    if not ctx["camera"]:
+        return None, "no_camera", ctx
     detections = (data.get("data") or {}).get("detections")
     if detections:  # frigate/reviews: decide per detection, not per review
         for det in detections:
             if isinstance(det, dict) and det.get("id"):
-                return _event(camera, det.get("id"), det,
-                              (det.get("data") or {}).get("zones"))
-        return None
-    if not data.get("id"):
-        return None
-    return _event(camera, data["id"], data, data.get("current_zones"))
+                return _event(ctx["camera"], det.get("id"), det,
+                              (det.get("data") or {}).get("zones")), "", {}
+        return None, "no_detection_id", ctx
+    if not ctx["event_id"]:
+        return None, "no_event_id", ctx
+    return _event(ctx["camera"], ctx["event_id"], data, ctx["zones"]), "", {}
+
+
+def event_from_payload(payload: dict) -> Event | None:
+    """Accept frigate/events ({before, after}) and frigate/reviews payloads."""
+    return parse_event(payload)[0]
 
 
 def _event(camera: str, event_id, data: dict, zones) -> Event:
@@ -73,8 +95,12 @@ class Bridge:
         self.http_post = http_post or ha.notify
         self.snapshot_fn = snapshot_fn or (
             lambda event_id: fetch_snapshot(cfg["frigate"]["url"], event_id))
-        self.gate = Gatekeeper(cfg, self._process)
+        self.gate = Gatekeeper(cfg, self._process, on_skip=self._record_skip)
         self.published: list[dict] = []
+        self.counts = {"received": 0, "published": 0, "skipped": 0, "fail_open": 0}
+        self.skip_by_reason: dict[str, int] = {}
+        self.stats_path = cfg.get("stats_path")
+        self._stats_warned = False
         if mqtt_factory:
             self.mqtt_factory = mqtt_factory
         else:
@@ -83,15 +109,53 @@ class Bridge:
 
     # -- pipeline ----------------------------------------------------------
     def handle_payload(self, payload: dict) -> bool:
-        event = event_from_payload(payload)
+        self.counts["received"] += 1
+        event, reason, ctx = parse_event(payload)
         if event is None:
+            self._record_skip(reason, camera=ctx.get("camera"),
+                              event_id=ctx.get("event_id"), zones=ctx.get("zones"))
             return False
         return self.gate.submit(event)
+
+    # -- observability (FLEET-116 slice 1: skips and fail-open are never silent)
+    def _record_skip(self, reason: str, event: Event | None = None, camera=None,
+                     event_id=None, zones=None) -> None:
+        self.counts["skipped"] += 1
+        self.skip_by_reason[reason] = self.skip_by_reason.get(reason, 0) + 1
+        log.info("SKIP reason=%s camera=%s event=%s zones=%s",
+                 reason,
+                 camera or getattr(event, "camera", None) or "-",
+                 event_id or getattr(event, "event_id", None) or "-",
+                 _fmt_zones(zones if zones is not None
+                            else getattr(event, "zones", None)))
+        self._save_stats()
+
+    def stats(self) -> dict:
+        return {
+            "received": self.counts["received"],
+            "published": self.counts["published"],
+            "skipped": self.counts["skipped"],
+            "fail_open": self.counts["fail_open"],
+            "skip_by_reason": dict(self.skip_by_reason),
+        }
+
+    def _save_stats(self) -> None:
+        if not self.stats_path:
+            return
+        try:
+            stats = self.stats()
+            stats["updated"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            Path(self.stats_path).write_text(json.dumps(stats))
+            self._stats_warned = False
+        except Exception as exc:  # noqa: BLE001 - stats must never break the pipeline
+            if not self._stats_warned:
+                self._stats_warned = True
+                log.warning("stats file %s not writable: %s", self.stats_path, exc)
 
     def _process(self, event: Event) -> None:
         image = self.snapshot_fn(event.event_id)
         if image is None:
-            log.info("no snapshot for %s, skipping", event.event_id)
+            self._record_skip("no_snapshot", event)
             return
         decision = self.ask_fn(
             image, event.state(), self.cfg["questions"],
@@ -101,6 +165,15 @@ class Bridge:
         )
         notify = rules.evaluate(decision.answers, self.cfg["rules"], decision.gate)
         reason = rules.describe(decision.answers, self.cfg["rules"], decision.gate)
+        if decision.is_fail_open:
+            self.counts["fail_open"] += 1
+            log.warning(
+                "FAIL_OPEN camera=%s event=%s no model answered (attempts: %s) "
+                "- event passes through and notifies per the fail-open rule",
+                event.camera, event.event_id,
+                "; ".join(f"{a['endpoint']}: {a['error']}"
+                          for a in decision.attempts) or "none recorded")
+            self._save_stats()
         record = {
             "event_id": event.event_id,
             "camera": event.camera,
@@ -129,6 +202,9 @@ class Bridge:
             client.loop_stop()
         except Exception as exc:  # noqa: BLE001
             log.error("decision publish failed: %s", exc)
+            return
+        self.counts["published"] += 1
+        self._save_stats()
 
     # -- mqtt --------------------------------------------------------------
     def _client(self):

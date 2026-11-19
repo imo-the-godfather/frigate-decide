@@ -18,6 +18,10 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="frigate-decide", parents=[common])
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("run", help="listen on MQTT and gate events", parents=[common])
+    stats_p = sub.add_parser("stats", help="print running totals published/skipped/fail_open",
+                             parents=[common])
+    stats_p.add_argument("--stats-path", default=None,
+                         help="stats file path (default: stats_path from config)")
     eval_p = sub.add_parser("eval", help="score models over a labeled folder",
                             parents=[common])
     eval_p.add_argument("folder")
@@ -37,6 +41,33 @@ def main(argv=None) -> int:
             "starting: model=%s shadow=%s endpoints=%s",
             cfg["decide"]["model"], cfg["shadow"], cfg["decide"]["endpoints"])
         Bridge(cfg).run_forever()
+        return 0
+
+    if args.cmd == "stats":
+        cfg = {}
+        if Path(args.config).exists():
+            cfg = load(args.config)
+        path = Path(args.stats_path or cfg.get("stats_path") or "")
+        if not str(path):
+            print("no stats_path configured - set stats_path in config.yaml")
+            return 1
+        if not path.exists():
+            print(f"no stats file at {path} - the bridge has not written one yet "
+                  f"(counters zero)")
+            return 0
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError) as exc:
+            print(f"stats file at {path} unreadable: {exc}")
+            return 1
+        by = data.get("skip_by_reason") or {}
+        breakdown = ", ".join(f"{k}={v}" for k, v in sorted(by.items())) or "none"
+        print(f"published: {data.get('published', 0)}")
+        print(f"skipped:   {data.get('skipped', 0)} ({breakdown})")
+        print(f"fail_open: {data.get('fail_open', 0)}")
+        print(f"received:  {data.get('received', 0)}")
+        if data.get("updated"):
+            print(f"updated:   {data['updated']} (from {path})")
         return 0
 
     cfg = {}

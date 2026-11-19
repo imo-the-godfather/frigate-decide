@@ -30,6 +30,7 @@ DEFAULTS = {
     "queue_max": 8,
     "shadow": True,
     "ha": {"webhook": None},
+    "stats_path": "/data/stats.json",  # running totals for `frigate-decide stats`
 }
 
 
