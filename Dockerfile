@@ -7,4 +7,7 @@ RUN pip install --no-cache-dir . \
 # /data (stats) is owned by nobody so the compose state volume initializes
 # writable by the runtime user.
 USER nobody
-CMD ["frigate-decide", "run", "--config", "/etc/frigate-decide/config.yaml"]
+# ENTRYPOINT so a compose `command:` override still runs the CLI (the
+# docker-compose.yml passes ["run", "--config", ...] as command args).
+ENTRYPOINT ["frigate-decide"]
+CMD ["run", "--config", "/etc/frigate-decide/config.yaml"]
