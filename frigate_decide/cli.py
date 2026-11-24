@@ -62,7 +62,10 @@ def main(argv=None) -> int:
             return 1
         by = data.get("skip_by_reason") or {}
         breakdown = ", ".join(f"{k}={v}" for k, v in sorted(by.items())) or "none"
+        decided = int(data.get("decided", 0))
         print(f"published: {data.get('published', 0)}")
+        print(f"decided:   {decided} (would-notify {data.get('would_notify', 0)}, "
+              f"silenced {data.get('silenced', 0)})")
         print(f"skipped:   {data.get('skipped', 0)} ({breakdown})")
         print(f"fail_open: {data.get('fail_open', 0)}")
         print(f"received:  {data.get('received', 0)}")

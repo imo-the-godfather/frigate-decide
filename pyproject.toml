@@ -8,6 +8,7 @@ license = { text = "MIT" }
 authors = [{ name = "RYKLIEF-ORG" }]
 dependencies = [
     "paho-mqtt>=2.0,<3",
+    "Pillow>=10",
     "PyYAML>=6,<7",
 ]
 

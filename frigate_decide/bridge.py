@@ -3,11 +3,15 @@
 Shadow mode (default) decides and publishes only; it changes nothing about
 the alerts you already get. Flip `shadow: false` when you trust the gate.
 """
+import io
 import json
 import logging
 import urllib.request
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
+
+from PIL import Image
 
 from . import decide, ha, rules
 from .queue import Event, Gatekeeper
@@ -15,6 +19,25 @@ from .queue import Event, Gatekeeper
 log = logging.getLogger("frigate-decide")
 
 DECISION_TOPIC = "frigate_decide/{camera}/decision"
+STATS_TOPIC = "frigate_decide/stats"
+
+
+def frame_error(data: bytes) -> str | None:
+    """Health-check a snapshot: full decode or None when the frame is good.
+
+    Frigate occasionally serves a glitched/truncated frame; deciding on one
+    produced a confident wrong answer in the 48h shadow window (FLEET-88).
+    """
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        width, height = img.size
+        img.close()
+    except Exception as exc:  # noqa: BLE001 - any decode failure = unhealthy
+        return f"decode failed: {exc}"[:160]
+    if width < 16 or height < 16:
+        return f"frame too small: {width}x{height}"
+    return None
 
 
 def _fmt_zones(zones) -> str:
@@ -96,11 +119,13 @@ class Bridge:
         self.snapshot_fn = snapshot_fn or (
             lambda event_id: fetch_snapshot(cfg["frigate"]["url"], event_id))
         self.gate = Gatekeeper(cfg, self._process, on_skip=self._record_skip)
-        self.published: list[dict] = []
-        self.counts = {"received": 0, "published": 0, "skipped": 0, "fail_open": 0}
+        self.published: deque = deque(maxlen=int(cfg.get("published_cap", 200)))
+        self.counts = {"received": 0, "published": 0, "skipped": 0, "fail_open": 0,
+                       "decided": 0, "would_notify": 0, "silenced": 0}
         self.skip_by_reason: dict[str, int] = {}
         self.stats_path = cfg.get("stats_path")
         self._stats_warned = False
+        self._stats_mqtt_warned = False
         if mqtt_factory:
             self.mqtt_factory = mqtt_factory
         else:
@@ -128,34 +153,51 @@ class Bridge:
                  event_id or getattr(event, "event_id", None) or "-",
                  _fmt_zones(zones if zones is not None
                             else getattr(event, "zones", None)))
-        self._save_stats()
+        self._emit_stats()
 
     def stats(self) -> dict:
         return {
             "received": self.counts["received"],
             "published": self.counts["published"],
+            "decided": self.counts["decided"],
+            "would_notify": self.counts["would_notify"],
+            "silenced": self.counts["silenced"],
             "skipped": self.counts["skipped"],
             "fail_open": self.counts["fail_open"],
             "skip_by_reason": dict(self.skip_by_reason),
         }
 
-    def _save_stats(self) -> None:
-        if not self.stats_path:
-            return
+    def _emit_stats(self) -> None:
+        """Write the stats file and publish totals on MQTT; never fatal."""
+        if self.stats_path:
+            try:
+                stats = self.stats()
+                stats["updated"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                Path(self.stats_path).write_text(json.dumps(stats))
+                self._stats_warned = False
+            except Exception as exc:  # noqa: BLE001 - stats must never break the pipeline
+                if not self._stats_warned:
+                    self._stats_warned = True
+                    log.warning("stats file %s not writable: %s", self.stats_path, exc)
         try:
-            stats = self.stats()
-            stats["updated"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            Path(self.stats_path).write_text(json.dumps(stats))
-            self._stats_warned = False
-        except Exception as exc:  # noqa: BLE001 - stats must never break the pipeline
-            if not self._stats_warned:
-                self._stats_warned = True
-                log.warning("stats file %s not writable: %s", self.stats_path, exc)
+            client = self._client()
+            client.publish(STATS_TOPIC, json.dumps(self.stats()))
+            client.loop_stop()
+        except Exception as exc:  # noqa: BLE001
+            if not self._stats_mqtt_warned:
+                self._stats_mqtt_warned = True
+                log.error("stats publish to %s failed: %s", STATS_TOPIC, exc)
 
     def _process(self, event: Event) -> None:
         image = self.snapshot_fn(event.event_id)
         if image is None:
             self._record_skip("no_snapshot", event)
+            return
+        unhealthy = frame_error(image)
+        if unhealthy:
+            log.warning("BAD_FRAME camera=%s event=%s: %s - skipping, no decision",
+                        event.camera, event.event_id, unhealthy)
+            self._record_skip("bad_frame", event)
             return
         decision = self.ask_fn(
             image, event.state(), self.cfg["questions"],
@@ -173,7 +215,9 @@ class Bridge:
                 event.camera, event.event_id,
                 "; ".join(f"{a['endpoint']}: {a['error']}"
                           for a in decision.attempts) or "none recorded")
-            self._save_stats()
+        else:
+            self.counts["decided"] += 1
+            self.counts["would_notify" if notify else "silenced"] += 1
         record = {
             "event_id": event.event_id,
             "camera": event.camera,
@@ -204,7 +248,7 @@ class Bridge:
             log.error("decision publish failed: %s", exc)
             return
         self.counts["published"] += 1
-        self._save_stats()
+        self._emit_stats()
 
     # -- mqtt --------------------------------------------------------------
     def _client(self):

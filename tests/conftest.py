@@ -6,8 +6,9 @@ import zlib
 from frigate_decide.decide import Decision
 
 
-def png_bytes(red: int = 200, green: int = 30, blue: int = 30, size: int = 8) -> bytes:
-    """A tiny valid PNG of one solid colour - enough to exercise the pipeline."""
+def png_bytes(red: int = 200, green: int = 30, blue: int = 30, size: int = 32) -> bytes:
+    """A tiny valid PNG of one solid colour - big enough to pass the 16px
+    frame-health floor and exercise the pipeline."""
     def chunk(tag: bytes, data: bytes) -> bytes:
         return (struct.pack(">I", len(data)) + tag + data
                 + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))

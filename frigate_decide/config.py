@@ -27,6 +27,7 @@ DEFAULTS = {
         "zones": [],
     },
     "cooldown_s": 120,
+    "published_cap": 200,
     "queue_max": 8,
     "shadow": True,
     "ha": {"webhook": None},
@@ -51,8 +52,22 @@ def validate(cfg: dict) -> dict:
         raise ValueError("decide.endpoints must list at least one Ollama URL")
     if float(decide["timeout_s"]) <= 0:
         raise ValueError("decide.timeout_s must be > 0")
-    if int(merged["cooldown_s"]) < 0:
+    cooldown = merged["cooldown_s"]
+    if isinstance(cooldown, dict):
+        # Per-camera cooldown: {"eva_lrc": 2100, "default": 120}. Cameras not
+        # listed use "default" (filled with the global default when absent).
+        normalized = {}
+        for camera, seconds in cooldown.items():
+            if float(seconds) < 0:
+                raise ValueError(f"cooldown_s[{camera}] must be >= 0")
+            normalized[str(camera)] = float(seconds)
+        normalized["default"] = normalized.get("default",
+                                               float(DEFAULTS["cooldown_s"]))
+        merged["cooldown_s"] = normalized
+    elif float(cooldown) < 0:
         raise ValueError("cooldown_s must be >= 0")
+    if int(merged["published_cap"]) < 1:
+        raise ValueError("published_cap must be >= 1")
     if int(merged["queue_max"]) < 1:
         raise ValueError("queue_max must be >= 1")
     questions = merged.get("questions") or default_questions()

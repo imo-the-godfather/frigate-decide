@@ -97,9 +97,16 @@ ones:
 - `rules.notify_when` - the gate. Any question, any field, any set of values.
 - `prefilter` - labels / min_score / zones / stationary_only, applied before
   the model sees anything.
+- `cooldown_s` - one decision per camera per window. A number applies the
+  same window everywhere; a mapping sets per-camera windows
+  (`{eva_lrc: 2100, default: 120}`) - the tool for a camera whose noise
+  pattern is bursts (a camera that ghosts 9 person detections over 33
+  minutes collapses to 1 model call with a window longer than the burst).
 - `shadow` - decide + publish only, change nothing. **Start here.**
 - `stats_path` - where running totals are written (`/data/stats.json` in the
-  compose setup; `null` disables).
+  compose setup; `null` disables the file; MQTT totals publish regardless).
+- `published_cap` - decision records kept in memory (`self.published`,
+  default 200; the newest are kept).
 
 ## Observability
 
@@ -109,22 +116,44 @@ fail-open decision logs one structured line.
 ```
 2026-11-19 05:21:00,123 frigate-decide INFO SKIP reason=cooldown camera=front_cam event=1793046391.796194-xbchwp zones=yard
 2026-11-19 05:21:00,456 frigate-decide WARNING FAIL_OPEN camera=front_cam event=1793046399.123-abc123 no model answered (attempts: http://127.0.0.1:11434: timeout) - event passes through and notifies per the fail-open rule
+2026-11-19 05:21:01,001 frigate-decide WARNING BAD_FRAME camera=front_cam event=1793046399.555-abc123: decode failed: Truncated File Read - skipping, no decision
 ```
 
 Skip reasons: `prefilter`, `duplicate`, `cooldown`, `full` (queue
 drop-oldest), `ended_event`, `no_camera`, `no_event_id`, `no_detection_id`,
-`no_snapshot`, `bad_payload`.
+`no_snapshot`, `bad_frame`, `bad_payload`.
 
-Running totals (published / skipped / fail_open):
+Running totals are written to `stats_path` and published to the MQTT topic
+`frigate_decide/stats` on every counter change:
 
 ```
 frigate-decide stats
 published: 12
+decided:   11 (would-notify 3, silenced 8)
 skipped:   47 (cooldown=31, ended_event=14, prefilter=2)
 fail_open: 1
 received:  60
 updated:   2026-11-19T05:21:00+00:00 (from /data/stats.json)
 ```
+
+`decided` counts model-answered decisions split into `would_notify` (the
+rules matched) and `silenced`; `fail_open` counts events no model answered -
+always notifies by design, which is why it must be watched, not trusted.
+
+**Alarming on the counters** (a decision gate that can fail silently needs a
+watcher): alert when
+
+- `fail_open` increases - the gate is blind and everything pages;
+- a structural skip (`no_snapshot`, `bad_frame`, `bad_payload`,
+  `no_detection_id`) increases - the pipeline itself is broken;
+- volume skips (`cooldown`, `duplicate`, `prefilter`, `ended_event`, `full`)
+  rise far above ambient - roughly 8x the steady rate is a good tripwire;
+- `updated` (or the stats topic) goes quiet past your longest cooldown - the
+  sidecar or its stats output is dead.
+
+Any cron that reads `stats_path` (or subscribes to the stats topic) and
+notifies on those conditions works; thresholds depend on your event volume,
+so document the ones you pick.
 
 ## Design notes
 

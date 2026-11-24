@@ -53,7 +53,7 @@ class Gatekeeper:
                 return False
             now = time.monotonic()
             last = self._last_seen.get(event.camera)
-            if last is not None and now - last < float(self.cfg["cooldown_s"]):
+            if last is not None and now - last < self._cooldown_for(event.camera):
                 self.dropped["cooldown"] += 1
                 self._skipped("cooldown", event)
                 return False
@@ -72,6 +72,12 @@ class Gatekeeper:
     def _skipped(self, reason: str, event: Event) -> None:
         if self.on_skip:
             self.on_skip(reason, event)
+
+    def _cooldown_for(self, camera: str) -> float:
+        cooldown = self.cfg["cooldown_s"]
+        if isinstance(cooldown, dict):
+            return float(cooldown.get(camera, cooldown["default"]))
+        return float(cooldown)
 
     def _passes_prefilter(self, event: Event) -> bool:
         pf = self.cfg["prefilter"]

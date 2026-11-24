@@ -14,6 +14,7 @@ CFG = {
     "prefilter": {"labels": [], "min_score": 0.0, "stationary_only": False,
                   "zones": []},
     "cooldown_s": 120,
+    "published_cap": 200,
     "queue_max": 8,
     "shadow": True,
     "ha": {"webhook": None},
@@ -133,7 +134,7 @@ def test_snapshot_failure_skips_without_decision():
     bridge.snapshot_fn = lambda event_id: None
     assert bridge.handle_payload(FRIGATE_EVENT) is True
     time.sleep(0.3)
-    assert bridge.published == []
+    assert len(bridge.published) == 0
 
 
 def test_reviews_payload_yields_per_detection_events():

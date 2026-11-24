@@ -118,6 +118,7 @@ def test_stats_cli_prints_totals(capsys, tmp_path):
     stats_path = tmp_path / "stats.json"
     stats_path.write_text(json.dumps({
         "received": 12, "published": 3, "skipped": 8, "fail_open": 1,
+        "decided": 2, "would_notify": 1, "silenced": 1,
         "skip_by_reason": {"cooldown": 6, "prefilter": 2},
         "updated": "2026-11-19T05:21:00+00:00"}))
     rc = cli_main(["--config", "/nonexistent", "stats",
@@ -125,6 +126,7 @@ def test_stats_cli_prints_totals(capsys, tmp_path):
     out = capsys.readouterr().out
     assert rc == 0
     assert "published: 3" in out
+    assert "decided:   2 (would-notify 1, silenced 1)" in out
     assert "skipped:   8 (cooldown=6, prefilter=2)" in out
     assert "fail_open: 1" in out
 

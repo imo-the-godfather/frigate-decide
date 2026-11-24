@@ -35,14 +35,26 @@ prefilter:
   zones: []                # empty = all zones
 
 cooldown_s: 120            # one decision per camera per window
+# Per-camera form - noisy cameras get a long window, the rest keep the
+# default (cameras not listed use "default"):
+# cooldown_s:
+#   default: 120
+#   eva_lrc: 2100           # ghost-person bursts at the wall edge repeat for
+#                           # ~30 min; one decision covers the burst
 queue_max: 8               # bounded queue, drop-oldest on burst
+
+published_cap: 200         # decision records kept in memory (self.published)
 
 shadow: true               # decide + publish only; flip to false when you
                            # trust the gate and ha.webhook is set
 ha:
   webhook: null            # e.g. http://127.0.0.1:8123/api/webhook/frigate_decide
 
-# Running totals for `frigate-decide stats` (published / skipped / fail_open).
-# Every skip and fail-open decision also logs a structured SKIP / FAIL_OPEN
-# line. Set to null to disable; /data is the compose state volume.
+# Running totals, re-published on every counter change:
+#   - stats file below (`frigate-decide stats` reads it)
+#   - MQTT topic frigate_decide/stats (decided / would_notify / silenced /
+#     skipped / fail_open + skip_by_reason)
+# Snapshots are decoded before any model call; a glitched or truncated frame
+# is skipped with reason=bad_frame. Set stats_path to null to disable the
+# file only; /data is the compose state volume.
 stats_path: /data/stats.json
