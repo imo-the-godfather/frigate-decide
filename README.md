@@ -144,12 +144,28 @@ always notifies by design, which is why it must be watched, not trusted.
 watcher): alert when
 
 - `fail_open` increases - the gate is blind and everything pages;
-- a structural skip (`no_snapshot`, `bad_frame`, `bad_payload`,
-  `no_detection_id`) increases - the pipeline itself is broken;
-- volume skips (`cooldown`, `duplicate`, `prefilter`, `ended_event`, `full`)
-  rise far above ambient - roughly 8x the steady rate is a good tripwire;
-- `updated` (or the stats topic) goes quiet past your longest cooldown - the
-  sidecar or its stats output is dead.
+- a structural skip (`bad_frame`, `bad_payload`) increases, or `no_snapshot`
+  increases by 3+ within one check window - the pipeline itself is broken.
+  A single `no_snapshot` is usually a short-lived false positive that Frigate
+  deleted before the gate fetched it, so paging on each one is noise;
+- volume skips (`cooldown`, `duplicate`, `prefilter`, `ended_event`, `full`,
+  `no_detection_id`) rise far above ambient. `no_detection_id` is the reviews
+  copy of an event the events path already decided, so it loses nothing.
+  Measure before you pick a number: over one 24h window on a two-camera
+  setup the 30-min volume-skip delta had mean 292, p95 821 and a peak of
+  1330 in the morning rush - a tripwire at 800 (~p93) paged on two ordinary
+  busy windows. 3000 (~2.3x the measured peak) leaves only a real runaway
+  (a loop, a flapping camera, a Frigate restart storm) above it;
+- the container is not running, or Docker restarted it - judged from the
+  container's own state, NOT from `updated` going quiet. `stats.json` is
+  written only when an event arrives and the cameras regularly see nothing
+  for 30-95 min at night, so "no stats for 30 min" paged five times in one
+  night for a healthy sidecar. A quiet `updated` is not a fault.
+
+Still not covered: a running-but-wedged process, or a dead event feed
+(container up, zero events arriving). Detecting those needs the sidecar to
+refresh its stats on a timer; until it does, treat `updated` as a
+diagnostic, not an alarm.
 
 Any cron that reads `stats_path` (or subscribes to the stats topic) and
 notifies on those conditions works; thresholds depend on your event volume,
